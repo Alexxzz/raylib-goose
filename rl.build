@@ -1,0 +1,9 @@
+// The rl package's sidecar. rl has no C of its own: its functions are bound
+// from the raylib shared library when the program starts (extern "raylib"
+// in rl.goose), which the loader finds as raylib.dll, libraylib.dylib or
+// libraylib.so. A program whose raylib is spelled otherwise maps it in its
+// own sidecar, e.g. dylibs_linux = ["raylib=libraylib.so.620"];
+//
+// raylib keeps one window and one GL context for the process, on the
+// thread that opened them.
+main_thread_only = true;
