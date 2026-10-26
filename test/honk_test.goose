@@ -131,12 +131,16 @@ fn order(eng: honk::Engine&) {
         f.rect(rl::Rectangle { 0.0, 120.0, 100.0, 100.0 }, rl::GREEN);
         f.screen();
         f.rect(rl::Rectangle { 50.0, 120.0, 100.0, 100.0 }, rl::YELLOW);  // screen over world
+        f.background();
+        f.layer = 100;
+        f.rect(rl::Rectangle { 0.0, 120.0, 320.0, 120.0 }, rl::PURPLE);  // under everything, whatever its layer
     };
     check(same(pixel(eng, 50, 50), rl::BLUE), "a higher layer draws over a lower one");
     check(same(pixel(eng, 150, 50), rl::RED), "the lower layer shows where the higher does not cover it");
     check(same(pixel(eng, 20, 150), rl::GREEN), "world pass");
     check(same(pixel(eng, 70, 150), rl::YELLOW), "the screen pass draws over the world");
-    check(eng.stats.commands == 4 && eng.stats.drawn == 4, "stats count the commands");
+    check(same(pixel(eng, 250, 150), rl::PURPLE), "the background pass");
+    check(eng.stats.commands == 5 && eng.stats.drawn == 5, "stats count the commands");
 }
 
 fn camera_and_culling(eng: honk::Engine&) {
@@ -204,9 +208,17 @@ fn shaders(eng: honk::Engine&) {
             f.rect(rl::Rectangle { 0.0, 0.0, 100.0, 100.0 }, rl::WHITE);
             f.screen();
             f.rect(rl::Rectangle { 100.0, 0.0, 100.0, 100.0 }, rl::WHITE);
+            f.background();
+            f.rect(rl::Rectangle { 200.0, 0.0, 100.0, 100.0 }, rl::WHITE);
         };
         check(same(pixel(eng, 50, 50), rl::BLACK), "post-processing of the world pass");
         check(same(pixel(eng, 150, 50), rl::WHITE), "the screen pass is not post-processed");
+        check(same(pixel(eng, 250, 50), rl::BLACK), "post-processing of the background pass");
+        draw_once(eng) { f =>
+            f.background();
+            f.rect(rl::Rectangle { 0.0, 0.0, 100.0, 100.0 }, rl::WHITE);
+        };
+        check(same(pixel(eng, 50, 50), rl::BLACK), "post-processing with only a background pass");
     };
     check(!eng.has_post, "unloading the post shader turns post-processing off");
 }

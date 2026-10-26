@@ -108,3 +108,9 @@ fn mouse(f: Frame&) -> rl::Vector2 { rl::GetMousePosition() }
 
 // The mouse, in the world: through the camera (without its shake).
 fn mouse_world(f: Frame&) -> rl::Vector2 { rl::GetScreenToWorld2D(rl::GetMousePosition(), f.eng.camera) }
+
+// How far the mouse wheel turned this frame: positive away from the user.
+fn wheel(f: Frame&) -> f32 { rl::GetMouseWheelMove() }
+
+// How far the mouse moved since the last frame, in screen pixels.
+fn mouse_delta(f: Frame&) -> rl::Vector2 { rl::GetMouseDelta() }

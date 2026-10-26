@@ -7,10 +7,12 @@ import math;
 import rl;
 
 // Draw passes, in drawing order. A command is drawn in the pass that was
-// current when it was recorded (Frame.space). Pass 0 is kept for a 3D world,
-// drawn under the 2D one, when the engine grows one.
-let WORLD = 1;      // through the 2D camera, culled against its view
-let SCREEN = 2;     // in screen pixels, over the world: HUD, menus
+// current when it was recorded (Frame.space). Pass 1 is kept for a 3D world,
+// drawn between the background and the 2D world, when the engine grows one.
+// Post-processing (honk::post_process) covers the background and the world.
+let BACKGROUND = 0; // in screen pixels, under the world: skies, backdrops
+let WORLD = 2;      // through the 2D camera, culled against its view
+let SCREEN = 3;     // in screen pixels, over the world: HUD, menus
 
 struct Config {
     width: i32 = 960,
@@ -32,6 +34,9 @@ struct Stats {
     culled: i64,            // world commands outside the camera's view
     command_bytes: i64,     // bytes of the packed command array
     index_bytes: i64,       // bytes of the index sorting it
+    sort_ms: f64,           // sorting the index
+    draw_ms: f64,           // culling and handing the commands to raylib
+    present_ms: f64,        // EndDrawing: raylib's last batch, the GPU and the swap
 }
 
 // The engine: fixed-size state plus a reference to the asset stack, which is
@@ -91,7 +96,7 @@ fn run<F>(config: Config) {
         target: rl::RenderTexture { .. }, has_target: false,
         music: rl::Music { .. }, has_music: false,
         capture: false, captured: rl::Image { .. }, has_captured: false,
-        stats: Stats { 0, 0, 0, 0, 0 },
+        stats: Stats { 0, 0, 0, 0, 0, 0.0, 0.0, 0.0 },
     };
     defer {
         release(eng, 0);
@@ -121,6 +126,9 @@ fn quit(eng: Engine&) { eng.quit = true; }
 //
 // The scene's locals are freed when its function returns, and the assets it
 // loaded are unloaded here, after it.
+//
+// When the first scene is a variant with a payload, its type is that
+// variant's; name the enum: honk::scenes<Scene>(eng, Scene.Play { level: 1 }).
 fn scenes<S, F>(eng: Engine&, first: S) {
     var scene = first;
     while running(eng) {
@@ -199,6 +207,25 @@ fn clamp_camera(eng: Engine&, bounds: rl::Rectangle) {
     eng.camera.target.y = rl::Clamp(eng.camera.target.y, bounds.y + half_h, bounds.y + bounds.height - half_h);
 }
 
+// Multiplies the camera's zoom by `factor`, keeping the world point under
+// `screen_point` (such as the mouse) where it is on the screen.
+fn zoom_at(eng: Engine&, screen_point: rl::Vector2, factor: f32) {
+    let anchor = rl::GetScreenToWorld2D(screen_point, eng.camera);
+    eng.camera.offset = screen_point;
+    eng.camera.target = anchor;
+    eng.camera.zoom *= factor;
+}
+
+// Moves the camera by `delta` screen pixels, as dragging the world does.
+fn pan(eng: Engine&, delta: rl::Vector2) {
+    eng.camera.target = rl::Vector2Subtract(eng.camera.target, rl::Vector2Scale(delta, 1.0/eng.camera.zoom));
+}
+
+// The rectangle of the world the camera shows (without its shake): a game
+// with very many objects can skip recording the ones outside it, or pick a
+// level of detail from eng.camera.zoom.
+fn view(f: Frame&) -> rl::Rectangle { view_bounds(f.eng.camera) }
+
 // Shakes the camera: amount adds to a trauma level that decays over about a
 // second. The shake moves the drawing only, not the camera mouse_world uses.
 fn shake(eng: Engine&, amount: f32) { eng.trauma = min(eng.trauma + amount, 1.0); }
@@ -231,9 +258,9 @@ fn view_bounds(camera: rl::Camera2D) -> rl::Rectangle {
 
 // --- post-processing -------------------------------------------------------------
 
-// Draws the world pass through `shader`, a fragment shader over the whole
-// world image (its texture is texture0). The screen pass is drawn after it,
-// unprocessed.
+// Draws the background and world passes through `shader`, a fragment
+// shader over their whole image (its texture is texture0). The screen pass
+// is drawn after it, unprocessed.
 fn post_process(eng: Engine&, shader: rl::Shader) {
     eng.post = shader;
     eng.has_post = true;

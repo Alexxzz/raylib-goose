@@ -44,7 +44,7 @@ struct Frame {
     time: f64,
     index: i64,
     layer: i32,                 // higher layers draw over lower ones, -32768..32767
-    space: i32,                 // WORLD or SCREEN
+    space: i32,                 // BACKGROUND, WORLD or SCREEN
     shader: u8,                 // slot in shaders + 1, 0: none
     font: u8,                   // slot in fonts + 1, 0: raylib's default font
     seq: i64,
@@ -68,6 +68,10 @@ fn height(f: Frame&) -> f32 { rl::GetScreenHeight() }
 
 // Commands recorded after this are drawn in screen pixels, over the world.
 fn screen(f: Frame&) { f.space = SCREEN; }
+
+// Commands recorded after this are drawn in screen pixels, under the world:
+// a sky, a backdrop.
+fn background(f: Frame&) { f.space = BACKGROUND; }
 
 // Commands recorded after this are drawn through the camera (the default).
 fn world(f: Frame&) { f.space = WORLD; }
@@ -229,13 +233,21 @@ fn points_bounds(points: const rl::Vector2[:], margin: f32) -> rl::Rectangle {
     return span(lo, hi, margin);
 }
 
-fn draw(f: Frame&, c: Cmd..&) {
+// The segments a circle of `radius` needs to look round at `scale` screen
+// pixels per unit: a few for a dot, up to 72 for a big circle. raylib's own
+// DrawCircleV always uses 36, eighteen quads even for a speck.
+fn segments(radius: f32, scale: f32) -> i32 {
+    clamp((sqrt(radius*scale)*4.0) as! i32, 6, 72)
+}
+
+// Draws one command; `scale` is screen pixels per unit in its pass.
+fn draw(f: Frame&, c: Cmd..&, scale: f32) {
     match c {
         Rect r => rl::DrawRectanglePro(r.r, r.origin, r.rotation, r.color),
         RectLines r => rl::DrawRectangleLinesEx(r.r, r.thick, r.color),
-        Circle c => rl::DrawCircleV(c.center, c.radius, c.color),
-        CircleLines c => rl::DrawCircleLinesV(c.center, c.radius, c.color),
-        Ring r => rl::DrawRing(r.center, r.inner, r.outer, 0.0, 360.0, 36, r.color),
+        Circle c => rl::DrawCircleSector(c.center, c.radius, 0.0, 360.0, segments(c.radius, scale), c.color),
+        CircleLines c => rl::DrawCircleSectorLines(c.center, c.radius, 0.0, 360.0, segments(c.radius, scale), c.color),
+        Ring r => rl::DrawRing(r.center, r.inner, r.outer, 0.0, 360.0, segments(r.outer, scale), r.color),
         Line l => rl::DrawLineEx(l.a, l.b, l.thick, l.color),
         Triangle t => rl::DrawTriangle(t.a, t.b, t.c, t.color),
         Poly p => rl::DrawPoly(p.center, p.sides, p.radius, p.rotation, p.color),
@@ -251,7 +263,9 @@ fn draw(f: Frame&, c: Cmd..&) {
 // Sorts and draws the frame's commands. Called by honk::frames.
 fn flush(f: Frame&) {
     let eng .= f.eng;
+    let t0 = rl::GetTime();
     stable_sort(f.order) { a, b => a.key < b.key };
+    let t1 = rl::GetTime();
     let camera = shaken_camera(eng);
     let view = view_bounds(camera);
     let width = rl::GetScreenWidth();
@@ -274,8 +288,13 @@ fn flush(f: Frame&) {
         let p = it.key >> 56;
         if p != pass {
             if shader != 0 { rl::EndShaderMode(); shader = 0; }
-            if pass == WORLD { end_world(eng, post); }
-            if p == WORLD { begin_world(eng, camera, post); }
+            if pass == WORLD { rl::EndMode2D(); }
+            // The background and the world go into the post-processing
+            // target together; the screen pass is drawn over the result.
+            // Passes come in ascending order.
+            if post && pass >= 0 && pass <= WORLD && p > WORLD { end_target(eng); }
+            if post && pass < 0 && p <= WORLD { begin_target(eng); }
+            if p == WORLD { rl::BeginMode2D(camera); }
             pass = p;
         }
         if it.shader != shader {
@@ -287,11 +306,13 @@ fn flush(f: Frame&) {
             culled++;
             continue;
         }
-        draw(f, it.cmd);
+        draw(f, it.cmd, if p == WORLD { camera.zoom } else { 1.0 });
         drawn++;
     }
     if shader != 0 { rl::EndShaderMode(); }
-    if pass == WORLD { end_world(eng, post); }
+    if pass == WORLD { rl::EndMode2D(); }
+    if post && pass >= 0 && pass <= WORLD { end_target(eng); }
+    let t2 = rl::GetTime();
 
     eng.stats = Stats {
         commands: f.order.len,
@@ -299,6 +320,9 @@ fn flush(f: Frame&) {
         culled: culled,
         command_bytes: bytes_of(f.cmds).len,
         index_bytes: f.order.len*ITEM_BYTES,
+        sort_ms: (t1 - t0)*1000.0,
+        draw_ms: (t2 - t1)*1000.0,
+        present_ms: eng.stats.present_ms,       // the frame before's: this one's is not over
     };
     if eng.debug { draw_debug(eng); }
     if eng.capture {
@@ -312,34 +336,34 @@ fn flush(f: Frame&) {
         eng.has_captured = true;
         eng.capture = false;
     }
+    let t3 = rl::GetTime();
     rl::EndDrawing();
+    eng.stats.present_ms = (rl::GetTime() - t3)*1000.0;
 }
 
-fn begin_world(eng: Engine&, camera: rl::Camera2D, post: bool) {
-    if post {
-        rl::BeginTextureMode(eng.target);
-        rl::ClearBackground(eng.config.clear);
-    }
-    rl::BeginMode2D(camera);
+fn begin_target(eng: Engine&) {
+    rl::BeginTextureMode(eng.target);
+    rl::ClearBackground(eng.config.clear);
 }
 
-fn end_world(eng: Engine&, post: bool) {
-    rl::EndMode2D();
-    if post {
-        rl::EndTextureMode();
-        // A render texture is upside down: draw it with a negative height.
-        let t = eng.target.texture;
-        rl::BeginShaderMode(eng.post);
-        rl::DrawTextureRec(t, rl::Rectangle { 0.0, 0.0, t.width, -t.height }, rl::Vector2 { 0.0, 0.0 }, rl::WHITE);
-        rl::EndShaderMode();
-    }
+fn end_target(eng: Engine&) {
+    rl::EndTextureMode();
+    // A render texture is upside down: draw it with a negative height.
+    let t = eng.target.texture;
+    rl::BeginShaderMode(eng.post);
+    rl::DrawTextureRec(t, rl::Rectangle { 0.0, 0.0, t.width, -t.height }, rl::Vector2 { 0.0, 0.0 }, rl::WHITE);
+    rl::EndShaderMode();
 }
 
 fn draw_debug(eng: Engine&) {
     let s = eng.stats;
-    rl::DrawRectangle(4, 4, 340, 88, rl::Fade(rl::BLACK, 0.7));
+    rl::DrawRectangle(4, 4, 340, 108, rl::Fade(rl::BLACK, 0.7));
     rl::DrawText(str(rl::GetFPS(), " fps, frame ", eng.frame), 10, 8, 18, rl::GREEN);
     rl::DrawText(str(s.commands, " commands: ", s.drawn, " drawn, ", s.culled, " culled"), 10, 28, 18, rl::GREEN);
     rl::DrawText(str("draw list ", s.command_bytes, " + ", s.index_bytes, " bytes"), 10, 48, 18, rl::GREEN);
     rl::DrawText(str(eng.assets.len, " assets loaded"), 10, 68, 18, rl::GREEN);
+    rl::DrawText(str("sort ", ms(s.sort_ms), ", draw ", ms(s.draw_ms), ", present ", ms(s.present_ms), " ms"), 10, 88, 18, rl::GREEN);
+}
+
+fn ms(x: f64) -> f64 { ((x*100.0) as! i64)/100.0
 }
