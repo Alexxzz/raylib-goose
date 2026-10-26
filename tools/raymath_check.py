@@ -123,7 +123,7 @@ def main():
         open(gsrc, "w").write("\n".join(g) + "\n")
         subprocess.run([cc, "-O0", "-ffp-contract=off", "-I", include, csrc, "-o", exe, "-lm"], check=True)
         cout = subprocess.run([exe], check=True, capture_output=True, text=True).stdout.split()
-        gout = subprocess.run([goose, "run", "-q", gsrc], check=True, capture_output=True, text=True).stdout.split()
+        gout = subprocess.run([goose, "run", gsrc], check=True, capture_output=True, text=True).stdout.split()
 
     def f32(s):
         if s in ("true", "false"):
