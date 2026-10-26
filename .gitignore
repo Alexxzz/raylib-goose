@@ -1,0 +1,6 @@
+__pycache__/
+# executables from goose build
+examples/*
+!examples/*.goose
+test/*
+!test/*.goose
