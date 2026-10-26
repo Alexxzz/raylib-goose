@@ -91,6 +91,7 @@ goose build examples/core_3d_camera.goose && ./examples/core_3d_camera
 | `shaders_uniforms` | `LoadShaderFromMemory` with the default vertex shader, `SetShaderValue` |
 | `honk/hello` | The honk engine in 40 lines |
 | `honk/goose_grove` | A complete game on honk: scenes, a pause overlay, pools, particles, shaders, saved scores |
+| `honk/goose_galaxy` | A stress test: up to a million geese in a spiral galaxy, zoom with level of detail, a benchmark mode |
 
 ## How C types map to Goose
 
@@ -185,7 +186,7 @@ python3 tools/gen_bindings.py
 `tools/test.sh` checks that `rl.goose` matches the generator, that every
 struct matches `raylib.h`, and that raymath matches `raymath.h`. It also
 checks that the examples typecheck, runs the smoke test and the engine test,
-and plays `goose_grove` through every scene. Those open a window, so use
+plays `goose_grove` through every scene, and draws `goose_galaxy`. Those open a window, so use
 `xvfb-run` without a display:
 
 ```sh

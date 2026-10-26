@@ -36,6 +36,11 @@ Examples:
 
 * [`examples/honk/hello.goose`](examples/honk/hello.goose) shows a camera,
   input and text in 40 lines.
+* [`examples/honk/goose_galaxy.goose`](examples/honk/goose_galaxy.goose)
+  is a stress test: up to a million geese orbit in a spiral galaxy. You can
+  zoom from the whole galaxy down to one goose flapping its wings, with level
+  of detail chosen by the zoom, and click to send honk shockwaves through the
+  flock. `-- --bench --fast` prints frame times for 4 000 to 256 000 geese.
 * [`examples/honk/goose_grove.goose`](examples/honk/goose_grove.goose) is a
   complete game. It has title, play and game-over scenes and a pause overlay.
   Foxes and honks live in reusable pools, and there are particles. Its sprites
@@ -53,7 +58,8 @@ Examples:
 | one iteration of `honk::frames` | one frame | the frame's draw commands and their sort index |
 
 **A scene is a function.** `honk::scenes` calls one scene function at a
-time. The function returns the next scene, a value of the game's own enum.
+time. When the first scene is a variant with a payload, name the enum:
+`honk::scenes<Scene>(eng, Scene.Play { level: 1 })`. The function returns the next scene, a value of the game's own enum.
 Its locals are the scene's state, so returning frees all of it in one store.
 The engine then unloads the GPU and audio resources the scene loaded.
 
@@ -153,14 +159,17 @@ as a bad value.
 
 ### Drawing
 
-Commands are drawn in passes: the world through `eng.camera`, then the
-screen in pixels on top. Within a pass they are drawn by `f.layer` (higher
-layers on top), then in the order they were recorded. World commands outside
-the camera's view are culled.
+Commands are drawn in passes. The background comes first, in screen pixels
+(skies, backdrops). Then the world, through `eng.camera`. Then the screen,
+in pixels on top (HUD, menus). Within a pass they are drawn by `f.layer`
+(higher layers on top), then in the order they were recorded. World commands
+outside the camera's view are culled. Circles and rings get as many segments
+as their size on the screen needs, so a dot costs a few triangles rather than
+raylib's fixed 36.
 
 | | |
 |---|---|
-| `f.world()`, `f.screen()` | the pass for the commands recorded next |
+| `f.background()`, `f.world()`, `f.screen()` | the pass for the commands recorded next |
 | `f.layer = n` | the layer for the commands recorded next, -32768..32767 |
 | `f.use_shader(s)`, `f.no_shader()` | a fragment shader for the commands recorded next |
 | `f.use_font(font)`, `f.default_font()` | the font for text recorded next |
@@ -172,11 +181,14 @@ the camera's view are culled.
 | `f.text(s, pos, size, color)`, `f.text_centered(s, center, size, color)`, `f.measure(s, size)` | text, copied into the command |
 | `f.width()`, `f.height()` | the screen's size |
 | `honk::follow(eng, target, rate)`, `honk::clamp_camera(eng, bounds)`, `honk::shake(eng, amount)` | the camera |
-| `honk::post_process(eng, shader)`, `honk::no_post_process(eng)` | a fragment shader over the drawn world pass |
+| `honk::zoom_at(eng, screen_point, factor)`, `honk::pan(eng, screen_delta)` | zoom keeping a point (the mouse) in place; drag the world |
+| `f.view()` | the world rectangle the camera shows, to skip recording what is off screen |
+| `honk::post_process(eng, shader)`, `honk::no_post_process(eng)` | a fragment shader over the drawn background and world passes |
 | `honk::capture_next(eng)`, `honk::captured(eng)` | an `rl::Image` of the next frame |
 
 F1 shows a debug overlay: frame rate, commands drawn and culled, the draw
-list's bytes, and assets loaded.
+list's bytes, assets loaded, and the time spent sorting, drawing and
+presenting. The same numbers are in `eng.stats`.
 
 ### Input
 
@@ -188,7 +200,7 @@ inputs can drive one action.
 | `honk::bind_key`, `bind_mouse`, `bind_pad`, `bind_axis(eng, action, axis, positive)`, `unbind_all` | bindings |
 | `f.down(a)`, `f.pressed(a)`, `f.released(a)` | an action's state this frame |
 | `f.axis(neg, pos)`, `f.direction(left, right, up, down)` | -1..1, and a normalized direction |
-| `f.mouse()`, `f.mouse_world()` | the mouse on the screen and in the world |
+| `f.mouse()`, `f.mouse_world()`, `f.mouse_delta()`, `f.wheel()` | the mouse on the screen and in the world, its movement, the wheel |
 | `honk::press(eng, a)` | holds an action down next frame: tests, replays, computer players |
 
 ### Assets
@@ -214,8 +226,8 @@ inputs can drive one action.
 
 3D is not there yet, but the design leaves room for it:
 
-* Passes are numbers in the sort key, and pass 0 is kept free for a 3D world
-  drawn under the 2D one. A 3D pass would begin and end `BeginMode3D` with an
+* Passes are numbers in the sort key, and pass 1 is kept free for a 3D world
+  drawn between the background and the 2D world. A 3D pass would begin and end `BeginMode3D` with an
   `rl::Camera3D` kept in the engine, as the world pass does with the 2D
   camera.
 * Commands are an enum, so models, meshes, billboards and 3D primitives are
@@ -226,6 +238,35 @@ inputs can drive one action.
 * Scenes, frames, input, assets and saving do not depend on the
   dimension.
 
+## Performance
+
+`goose_galaxy --bench --fast --plain` measures frame times. These are from a
+native build (`goose build`) on a Linux machine with no GPU: raylib draws
+through Mesa's llvmpipe, which rasterizes on the CPU. A real GPU makes the
+draw column much smaller; the update and record columns are Goose's.
+
+| geese | zoomed out: ms per frame | update + record | zoomed in, game culls |
+|---:|---:|---:|---:|
+| 4 000 | 5.5 | 0.3 | 6.6 |
+| 16 000 | 17.3 | 1.0 | 4.5 |
+| 64 000 | 66.2 | 4.5 | 8.2 |
+| 256 000 | 135.6 | 18.1 | 21.6 |
+
+Notes:
+
+* honk's own cost is small. Sorting is almost free, because the index is
+  nearly in order already. Drawing 64 000 rectangles through honk measured
+  the same as calling raylib directly.
+* With very many objects, skip what is off screen before recording it
+  (`f.view()`). honk culls anything it is given, but recording costs about
+  70 ns a command. Zoomed in on 256 000 geese, game-side culling takes 23 ms
+  a frame where honk-side culling takes 42 ms (`--honk-culls`).
+* Pick a cheaper primitive for small things: the galaxy draws geese as
+  rectangles below 6 pixels, dots up to 14, sprites above.
+* The flock lives in the galaxy scene, so `+` and `-` return a new scene.
+  The old flock (36 bytes a goose, 37 MB at the most) is freed in one store,
+  and the new one is built in milliseconds.
+
 ## Tests
 
 `test/honk_test.goose` checks the engine against real raylib, reading
@@ -234,4 +275,5 @@ lifetimes, input, draw order, the screen pass, the camera, culling counts,
 command packing, shaders, uniforms, post-processing, sprites, fixed steps,
 and save/load (including damaged files). `tools/test.sh` runs it, then plays
 `goose_grove` through every scene with the computer player and checks that
-it reached game over and saved the score.
+it reached game over and saved the score. It also draws `goose_galaxy` with
+50 000 geese and checks that its screenshot was saved.

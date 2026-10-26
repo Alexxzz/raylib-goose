@@ -23,7 +23,7 @@ documentation; this file is about changing the code.
 | `tools/test.sh` | Runs all checks | Yes |
 | `honk.goose` | The engine's entry: imports its modules | When adding a module |
 | `honk/*.goose` | The engine: `engine` (run, scenes, frames, camera), `render` (draw list), `input`, `assets`, `sprite`, `store` | Yes |
-| `examples/honk/*.goose` | Engine examples; `goose_grove` is a full game with an `--autoplay` computer player | Yes |
+| `examples/honk/*.goose` | Engine examples; `goose_grove` is a full game with an `--autoplay` computer player, `goose_galaxy` a stress test with `--bench` | Yes |
 | `test/honk_test.goose` | Engine checks, on pixels of captured frames | Yes, add checks for new behavior |
 | `HONK.md` | The engine's guide and API reference | Keep in step with the API |
 
@@ -59,7 +59,8 @@ RAYLIB_SRC=path/to/raylib/src GOOSE=path/to/goose xvfb-run -a tools/test.sh
 ```
 
 Expected: 202/202 layouts, 3268/3268 raymath results, examples typecheck,
-54/54 smoke checks, 37/37 honk checks, and goose_grove played to game over. `goose check file.goose` typechecks without running.
+54/54 smoke checks, 40/40 honk checks, goose_grove played to game over, and
+goose_galaxy's screenshot saved. `goose check file.goose` typechecks without running.
 `goose build --cc clang file.goose` checks a native build too.
 
 To look at an example, run it in the background under Xvfb and grab the
@@ -107,6 +108,13 @@ examples only exit when the window closes.
 - Goose keywords used as C names get a trailing `_` (`type` -> `type_`).
 - `Matrix` fields are declared `m0, m4, m8, m12, m1, ...` as in C, so a
   positional `Matrix { ... }` fills it row by row, like a C initializer.
+- A `return` in a block returns from the **function** the block is written
+  in, even through other blocks: a `return` in a `honk::frames` body
+  written inside a `honk::run` body ends the whole run body. Put a frame
+  loop that should end on its own in a function of its own.
+- When a generic parameter's type comes from an enum variant with a payload
+  (`Scene.Play { .. }`), it is inferred as the variant type; pass the enum
+  explicitly (`honk::scenes<Scene>(...)`).
 - **Calling a block with a local `var` passes a copy.** In a HOF,
   `F(x)` with `var x` hands the block its own copy, and changes made in the
   block are lost. Write `F(&x)` (or `for &e in xs` then `F(e)`) to pass a
@@ -140,8 +148,14 @@ The engine is built on Goose's memory model. Keep it that way:
   a new `Cmd` variant with a `draw` arm and a `bounds` arm (culling), a
   `Frame` method that records it, and a check in `test/honk_test.goose`.
   `ITEM_BYTES` must stay the size of `Item`.
-- **Sort key** = pass << 56 | (layer + 32768) << 40 | sequence. Pass 0 is
-  kept for a future 3D world; `WORLD` = 1, `SCREEN` = 2.
+- **Sort key** = pass << 56 | (layer + 32768) << 40 | sequence. Passes:
+  `BACKGROUND` = 0, 1 kept for a future 3D world, `WORLD` = 2, `SCREEN` = 3.
+  Post-processing covers the passes up to `WORLD`.
+- **Measure before optimizing.** `goose_galaxy --bench --fast --plain` and
+  `eng.stats` (sort/draw/present ms) split the frame. On this project's
+  headless machines raylib draws through llvmpipe, so "draw" is CPU
+  rasterizing, not honk. Circles once cost 18 quads each (raylib's fixed 36
+  segments) and made the galaxy 7x slower; `segments()` now sizes them.
 - **Non-Goose resources go on the asset stack** (`Asset` enum) so scopes
   unload them; a new resource kind is a new `Asset` variant and an
   `unload` arm.

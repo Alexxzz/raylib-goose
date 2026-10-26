@@ -42,5 +42,11 @@ tmp=$(mktemp -d)
 (cd "$tmp" && "$GOOSE" run "$repo/examples/honk/goose_grove.goose" -- --autoplay --fast --frames 6000 > game.log 2>&1) \
     || { tail -20 "$tmp/game.log"; exit 1; }
 test -f "$tmp/goose_grove_scores.bin" || { echo "the game never reached game over"; exit 1; }
-rm -rf "$tmp"
 echo "played to game over and saved the score"
+
+echo "== goose_galaxy: 50 000 geese, zoomed in, through a captured screenshot"
+"$GOOSE" run examples/honk/goose_galaxy.goose -- --count 50000 --zoom 2 --at 1500 -500 --fast \
+    --screenshot "$tmp/galaxy.png" > "$tmp/galaxy.log" 2>&1 || { tail -20 "$tmp/galaxy.log"; exit 1; }
+test -s "$tmp/galaxy.png" || { echo "the galaxy saved no screenshot"; exit 1; }
+rm -rf "$tmp"
+echo "drew the galaxy and saved its screenshot"
