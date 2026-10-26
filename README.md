@@ -36,6 +36,10 @@ cheatsheet carry over directly: `DrawCircleV` is `rl::DrawCircleV`,
 * **No C to compile.** The functions are bound from the raylib shared
   library when the program starts (Goose's `extern "raylib" { ... }`), so
   `goose run` works with no C toolchain installed.
+* **honk, a 2D game engine** on top of the bindings (`import rl.honk;`).
+  It provides scenes, input actions, a sorted and culled draw list, shaders
+  and post-processing, sprites, asset lifetimes and saving, all built around
+  Goose's memory model. See [HONK.md](HONK.md).
 
 ## Installing
 
@@ -85,6 +89,8 @@ goose build examples/core_3d_camera.goose && ./examples/core_3d_camera
 | `core_3d_camera` | `Camera3D`, `UpdateCamera(camera, ...)` through a reference, `GetWorldToScreen` |
 | `textures_plasma` | Pixels computed in Goose and uploaded with `UpdateTexture` |
 | `shaders_uniforms` | `LoadShaderFromMemory` with the default vertex shader, `SetShaderValue` |
+| `honk/hello` | The honk engine in 40 lines |
+| `honk/goose_grove` | A complete game on honk: scenes, a pause overlay, pools, particles, shaders, saved scores |
 
 ## How C types map to Goose
 
@@ -153,8 +159,10 @@ rl.goose            the bindings, generated: structs, constants, externs, wrappe
 rl_extras.goose     hand-written typed overloads for raylib's void * parameters
 raymath.goose       raymath, ported to Goose
 rl.build            the package's sidecar (no C; main_thread_only)
-examples/           ports of raylib examples
+honk.goose, honk/   the honk engine, a module of the package (HONK.md)
+examples/           ports of raylib examples; examples/honk/ for the engine
 test/smoke.goose    calls a wide sample of the API against real raylib and checks the results
+test/honk_test.goose  checks the engine, on rendered pixels
 tools/              the generator and the checks
 ```
 
@@ -175,9 +183,10 @@ python3 tools/gen_bindings.py
 ```
 
 `tools/test.sh` checks that `rl.goose` matches the generator, that every
-struct matches `raylib.h`, that raymath matches `raymath.h`, that the
-examples typecheck, and runs the smoke test (which opens a window; use
-`xvfb-run` without a display):
+struct matches `raylib.h`, and that raymath matches `raymath.h`. It also
+checks that the examples typecheck, runs the smoke test and the engine test,
+and plays `goose_grove` through every scene. Those open a window, so use
+`xvfb-run` without a display:
 
 ```sh
 RAYLIB_SRC=path/to/raylib/src GOOSE=goose tools/test.sh

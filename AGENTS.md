@@ -1,8 +1,10 @@
 # AGENTS.md
 
 Notes for coding agents (and people) working on this repository: Goose
-bindings for raylib 6.2, published as the package `rl`. README.md is the
-user-facing documentation; this file is about changing the code.
+bindings for raylib 6.2, published as the package `rl`, and honk, a 2D game
+engine on top of them that ships as a module of that package
+(`import rl.honk;`). README.md and HONK.md are the user-facing
+documentation; this file is about changing the code.
 
 ## Files
 
@@ -19,6 +21,11 @@ user-facing documentation; this file is about changing the code.
 | `tools/check_layout.py` | Compares struct sizes/offsets with `raylib.h` via a C compiler | Yes |
 | `tools/raymath_check.py` | Runs every raymath function in C and Goose, compares f32 bits | Yes |
 | `tools/test.sh` | Runs all checks | Yes |
+| `honk.goose` | The engine's entry: imports its modules | When adding a module |
+| `honk/*.goose` | The engine: `engine` (run, scenes, frames, camera), `render` (draw list), `input`, `assets`, `sprite`, `store` | Yes |
+| `examples/honk/*.goose` | Engine examples; `goose_grove` is a full game with an `--autoplay` computer player | Yes |
+| `test/honk_test.goose` | Engine checks, on pixels of captured frames | Yes, add checks for new behavior |
+| `HONK.md` | The engine's guide and API reference | Keep in step with the API |
 
 After changing the generator: `python3 tools/gen_bindings.py`, and commit
 the regenerated `rl.goose` with it (`tools/test.sh` fails if it is stale).
@@ -52,7 +59,7 @@ RAYLIB_SRC=path/to/raylib/src GOOSE=path/to/goose xvfb-run -a tools/test.sh
 ```
 
 Expected: 202/202 layouts, 3268/3268 raymath results, examples typecheck,
-54/54 smoke checks. `goose check -q file.goose` typechecks without running.
+54/54 smoke checks, 37/37 honk checks, and goose_grove played to game over. `goose check file.goose` typechecks without running.
 `goose build --cc clang file.goose` checks a native build too.
 
 To look at an example, run it in the background under Xvfb and grab the
@@ -100,6 +107,46 @@ examples only exit when the window closes.
 - Goose keywords used as C names get a trailing `_` (`type` -> `type_`).
 - `Matrix` fields are declared `m0, m4, m8, m12, m1, ...` as in C, so a
   positional `Matrix { ... }` fills it row by row, like a C initializer.
+- **Calling a block with a local `var` passes a copy.** In a HOF,
+  `F(x)` with `var x` hands the block its own copy, and changes made in the
+  block are lost. Write `F(&x)` (or `for &e in xs` then `F(e)`) to pass a
+  reference.
+- `pad` and the type names (`f32`, `i64`, ...) are keywords: they cannot
+  name parameters, fields or functions.
+- `for &e in xs { ... }` iterates by reference; `for e in xs` copies.
+- A block may `return` from the function it is written in, through the HOF
+  running it; `defer` in the HOF still runs. honk's scene exits rely on it.
+- raylib batches 2D draws until a state change or `EndDrawing`; read the
+  screen (`LoadImageFromScreen`) only after `rl::EndMode2D()` or a similar
+  flush, or the last batch is missing.
+- Newer compilers print nothing on success and have no `-q`; `--stats`
+  shows what the compile did.
+
+## honk: design rules
+
+The engine is built on Goose's memory model. Keep it that way:
+
+- **The engine owns no game state.** Game data lives in the scopes of the
+  game's functions: the `honk::run` body for the whole program, a scene
+  function for a scene, a frame iteration for draw commands. Don't add a
+  registry, entity store or scene stack to the engine; a scene is a
+  function, an overlay is a call.
+- **Nothing allocates outside a scope.** Fixed-size state is inline
+  (`Binding[..64]`, the frame's `rl::Shader[..15]` table, action bits in a
+  `u64`). Per-frame data is in arrays local to the `honk::frames`
+  iteration.
+- **The draw list is a packed variable-mode `Cmd..` array plus an index of
+  `Item`s** (sort key, shader slot, reference). A new drawing primitive is
+  a new `Cmd` variant with a `draw` arm and a `bounds` arm (culling), a
+  `Frame` method that records it, and a check in `test/honk_test.goose`.
+  `ITEM_BYTES` must stay the size of `Item`.
+- **Sort key** = pass << 56 | (layer + 32768) << 40 | sequence. Pass 0 is
+  kept for a future 3D world; `WORLD` = 1, `SCREEN` = 2.
+- **Non-Goose resources go on the asset stack** (`Asset` enum) so scopes
+  unload them; a new resource kind is a new `Asset` variant and an
+  `unload` arm.
+- Pixel tests read frames with `honk::capture_next`/`honk::captured`. Its
+  readback flushes raylib's batch first (see the gotchas).
 
 ## raymath must stay bit-identical
 

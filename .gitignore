@@ -1,6 +1,11 @@
 __pycache__/
-# executables from goose build
+# executables from goose build, beside their sources
 examples/*
 !examples/*.goose
+!examples/honk/
+examples/honk/*
+!examples/honk/*.goose
 test/*
 !test/*.goose
+# saved by examples/honk/goose_grove
+goose_grove_scores.bin
