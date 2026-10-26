@@ -158,6 +158,11 @@ test/smoke.goose    calls a wide sample of the API against real raylib and check
 tools/              the generator and the checks
 ```
 
+## Contributing
+
+See [AGENTS.md](AGENTS.md) for how the generator works, setting up a
+machine to run the tests, and the conventions to keep.
+
 ## Regenerating and testing
 
 `rl.goose` is generated; change `tools/gen_bindings.py`, not the output.
